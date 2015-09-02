@@ -1,0 +1,277 @@
+---
+layout: post
+title:  "Combine 1.0.0 and a simple INI parser"
+date:   2015-08-28 23:04:15
+---
+
+[Combine][combine] 1.0.0 is released! This finally brings combine into stable semver territory meaning you can now use it without worrying about breakage when updating to a newer version.
+
+Rather than just posting an announcement with the few [breaking changes](https://github.com/Marwes/combine#breaking-changes) that happened between the [announcement of the beta][beta post] I thought I could make post about creating a parser from scratch using combine.
+
+[combine]:https://github.com/Marwes/combine
+[beta post]:https://www.reddit.com/r/rust/comments/3dmmp8/releasing_combine_100beta_previously/
+
+## A simple INI parser
+
+The [INI][ini] file format is an informal standard for configuration files. As they are quite simple to parse they make a good introductory example while still demonstrating the flexibiliy of using parser combinators for parsing.
+
+[ini]:https://en.wikipedia.org/wiki/INI_file
+
+{% highlight ini %}
+language=rust
+
+[section]
+name=combine ; Comment
+type=LL(1)
+
+{% endhighlight %}
+
+From the wiki page we can see that we need parsers for three major elements, properties, sections and whitespace (including comments). Well tackle each one separately in the order which they are needed.
+
+### Parsing properties
+
+Starting with properties we can see that we need to parse the property name followed by an equals sign followed by the value which reaches until the end of the line. In combine sequencing is most easily done using tuples so we can write the property parser like so.
+
+{% highlight rust %}
+
+(many1(satisfy(|c| c != '=')), token('='), many1(satisfy(|c| c != '\n')))
+    .map(|(key, _, value)| (key, value))
+
+{% endhighlight %}
+
+There are four different predefined parsers doing work in this line.
+* `satisfy` takes a function of type `(Item) -> bool` and creates a parser which only accepts the items which returns true for that predicate.
+* `many1` is a function which takes a parser and creates a new parser which applies the given parser one or more times (hence the 1 suffix).
+* `token` creates a parser which accepts the given token.
+* `map` transforms the result of a sucessful parse into a new result. We use it here to only return a tuple of the key and value, skipping the result of the `token('=')` parser.
+
+All put together we have constructed a property parser which we can pass around however we want, well almost. To create a parser with combine a the [Parser][Parser] trait is used, each parser is then its own type which implement the `Parser` trait. This is great for ensuring that the compiler never loses any information when it comes to optimizing the code at the cost of some rather large types.
+
+    //Type of the property parser
+    Map<(Many<_, Satisfy<_, [closure@examples\ini.rs:18:19: 18:31]>>, Token<_>, Many<_, Satisfy<_, [closure@examples\ini.rs:18:60: 18:73]>>), [closure@examples\ini.rs:19:14: 19:44]>
+
+Even if we could return closure types from functions that is still a long type we dont really want to type out. We could box the parser but that requires an allocation so we will instead do one better and wrap the parser inside a function which directly calls the parser.
+
+[Parser]:https://marwes.github.io/combine/combine/trait.Parser.html
+
+{% highlight rust %}
+
+///Wrapping the parser in a box is easy but needs an allocation
+fn property<'a, I>() -> Box<Parser<Input=I, Output=(String, String)> + 'a>
+where I: Stream<Item=char> + 'a {
+    Box::new((
+        many1(satisfy(|c| c != '=' && c != '[' && c != ';')),
+        token('='),
+        many1(satisfy(|c| c != '\n' && c != ';'))
+    )
+        .map(|(key, _, value)| (key, value)))
+}
+
+///Wrapping the parser in a function we avoid allocating a box each time we need the parser
+fn property<I>(input: State<I>) -> ParseResult<(String, String), I>
+where I: Stream<Item=char> {
+    (
+        many1(satisfy(|c| c != '=' && c != '[' && c != ';')),
+        token('='),
+        many1(satisfy(|c| c != '\n' && c != ';'))
+    )
+        .map(|(key, _, value)| (key, value))
+        .parse_state(input)
+}
+
+{% endhighlight %}
+
+### Parsing whitespace and comments
+
+Parsing whitespace are done similiarily as the property parser. We do however need a few more parsers to write it. The `skip_many` works in the same way as the `many` parser only it ignores the result which makes it a more efficient parser when we do not care about the result. Next we use the `or` method to create a parser which parses either whitespace through the predefined `spaces` parser or comments.
+
+{% highlight rust %}
+
+fn whitespace<I>(input: State<I>) -> ParseResult<(), I>
+where I: Stream<Item=char> {
+    let comment = (token(';'), skip_many(satisfy(|c| c != '\n')))
+        .map(|_| ());
+    //Wrap the `spaces().or(comment)` in `skip_many` so that it skips alternating whitespace and comments
+    skip_many(spaces().or(comment))
+        .parse_state(input)
+}
+
+{% endhighlight %}
+
+### Parsing sections
+
+The last parser we need before putting it all together is the parser for section. A sections starts with its name enclosed in brackets so we can use the `between` parser here which ignores the result of the enclosing parsers and only returns the result of what is inbetween. After the name we want to skip any whitespace that are between the name and the properties in the sections so here we need to use the `parser` function which turns the ordinary whitespace function into a parser. We use the same `parser` function to also wrap the `property` and `properties` function.
+
+{% highlight rust %}
+
+fn section<I>(input: State<I>) -> ParseResult<(String, HashMap<String, String>), I>
+where I: Stream<Item=char> {
+    (
+        between(token('['), token(']'), many(satisfy(|c| c != ']'))),
+        parser(whitespace),
+        parser(properties)
+    )
+        .map(|(name, _, properties)| (name, properties))
+        .parse_state(input)
+}
+
+fn properties<I>(input: State<I>) -> ParseResult<HashMap<String, String>, I>
+where I: Stream<Item=char> 
+    //After each property we skip any whitespace that followed it
+    many(parser(property).skip(parser(whitespace)))
+        .parse_state(input)
+}
+
+{% endhighlight %}
+
+### Putting it all together
+
+Finally we can put it all together into the complete ini parser. As each ini file can start with properties which do not belong to a named section we create a small struct which contains the global properties as well as the ones contained in a section. We then reuse the `properties` parser which we used above in the section parser to parse any properties which appear before any section. Lastly we skip any whitespace before the first property/section.
+
+{% highlight rust %}
+pub struct Ini {
+    pub global: HashMap<String, String>,
+    pub sections: HashMap<String, HashMap<String, String>>
+}
+
+fn ini<I>(input: State<I>) -> ParseResult<Ini, I>
+where I: Stream<Item=char> {
+    (parser(whitespace), parser(properties), many(parser(section)))
+        .map(|(_, global, sections)| Ini { global: global, sections: sections })
+        .parse_state(input)
+}
+{% endhighlight %}
+
+All that is left is to try it with some data.
+
+{% highlight rust %}
+    let text = r#"
+language=rust
+
+[section]
+name=combine; Comment
+type=LL(1)
+
+"#;
+let mut expected = Ini {
+    global: HashMap::new(),
+    sections: HashMap::new()
+};
+expected.global.insert(String::from("language"), String::from("rust"));
+
+let mut section = HashMap::new();
+section.insert(String::from("name"), String::from("combine"));
+section.insert(String::from("type"), String::from("LL(1)"));
+expected.sections.insert(String::from("section"), section);
+
+let result = parser(ini)
+    .parse(text)
+    .map(|t| t.0);
+assert_eq!(result, Ok(expected));
+{% endhighlight %}
+
+Its always a good idea to test error cases as well. This parser is quite liberal in what it accepts so creating a good error cases is a bit tricky but we can test unclosed sections. If we parse "[error" we would expect a readable error message.
+
+    Parse error at line: 1, column: 7
+    Unexpected 'end of input'
+    Expected ']'
+
+Which is pretty good but if we wanted to be a bit clear that we expected a section at this point we can use the `expected` combinator to attach an error message when the parser fails.
+
+{% highlight rust %}
+
+fn section<I>(input: State<I>) -> ParseResult<(String, HashMap<String, String>), I>
+where I: Stream<Item=char> {
+    (
+        between(token('['), token(']'), many(satisfy(|c| c != ']'))),
+        parser(whitespace),
+        parser(properties)
+    )
+        .map(|(name, _, properties)| (name, properties))
+        .expected("section")
+        .parse_state(input)
+}
+
+{% endhighlight %}
+
+    Parse error at line: 1, column: 7
+    Unexpected 'end of input'
+    Expected 'section'
+
+Which gives us an error message which may be a bit easier to understand.
+
+### The final parser
+
+Below is the parser in its entirety. It could use some improvements but as the ini format isn't exactly specified I prefer to keep it rather minimal. You can find the complete source with tests [here][ini source].
+
+[ini source]:https://github.com/Marwes/combine/blob/master/tests/ini.rs
+
+{% highlight rust %}
+
+#[derive(PartialEq, Debug)]
+pub struct Ini {
+    pub global: HashMap<String, String>,
+    pub sections: HashMap<String, HashMap<String, String>>
+}
+
+fn property<I>(input: State<I>) -> ParseResult<(String, String), I>
+where I: Stream<Item=char> {
+    (
+        many1(satisfy(|c| c != '=' && c != '[' && c != ';')),
+        token('='),
+        many1(satisfy(|c| c != '\n' && c != ';'))
+    )
+        .map(|(key, _, value)| (key, value))
+        .expected("property")
+        .parse_state(input)
+}
+
+fn whitespace<I>(input: State<I>) -> ParseResult<(), I>
+where I: Stream<Item=char> {
+    let comment = (token(';'), skip_many(satisfy(|c| c != '\n')))
+        .map(|_| ());
+    skip_many(skip_many1(space()).or(comment))
+        .parse_state(input)
+}
+
+fn properties<I>(input: State<I>) -> ParseResult<HashMap<String, String>, I>
+where I: Stream<Item=char> {
+    many(parser(property).skip(parser(whitespace)))
+        .parse_state(input)
+}
+
+fn section<I>(input: State<I>) -> ParseResult<(String, HashMap<String, String>), I>
+where I: Stream<Item=char> {
+    (
+        between(token('['), token(']'), many(satisfy(|c| c != ']'))),
+        parser(whitespace),
+        parser(properties)
+    )
+        .map(|(name, _, properties)| (name, properties))
+        .expected("section")
+        .parse_state(input)
+}
+
+fn ini<I>(input: State<I>) -> ParseResult<Ini, I>
+where I: Stream<Item=char> {
+    (parser(whitespace), parser(properties), many(parser(section)))
+        .map(|(_, global, sections)| Ini { global: global, sections: sections })
+        .parse_state(input)
+}
+
+{% endhighlight %}
+
+## Whats next
+
+Hopefully this should give a good idea about to go about building parsers using combine. In this case we only parse a string but this parsers could equally well be used to parse any other input stream such as iterators. More examples can be found in the [benches][benches] and [tests][tests] directories of combine.
+
+Though combine has reached 1.0.0 that does not mean that it is done. I have already two more features lying in wait, [zero copy parsing][zero copy] and using [non-cloneable iterators][no clone iterator]. These should get merged in under an experimental feature pretty soon so that they can get some testing before stabilizing them.
+
+Thats all for now, depending on the interest I may write more on this blog about combine or the [compiler][compiler] I am writing in rust in which you can find a much more complicated example on how to use combine.
+
+[benches]:https://github.com/Marwes/combine/blob/master/benches
+[tests]:https://github.com/Marwes/combine/blob/master/tests/
+
+[zero copy]:https://github.com/Marwes/combine/pull/42
+[no clone iterator]:https://github.com/Marwes/combine/pull/37
+[compiler]:https://github.com/Marwes/embed_lang
