@@ -6,7 +6,7 @@ date:   2015-08-28 23:04:15
 
 [Combine][combine] 1.0.0 is released! This finally brings combine into stable semver territory meaning you can now use it without worrying about breakage when updating to a newer version.
 
-Rather than just posting an announcement with the few [breaking changes](https://github.com/Marwes/combine#breaking-changes) that happened between the [announcement of the beta][beta post] I thought I could make post about creating a parser from scratch using combine.
+Rather than just posting an announcement with the few [breaking changes](https://github.com/Marwes/combine#breaking-changes) that happened between the [announcement of the beta][beta post] and now I figured I could write about how to create a parser from scratch using combine.
 
 [combine]:https://github.com/Marwes/combine
 [beta post]:https://www.reddit.com/r/rust/comments/3dmmp8/releasing_combine_100beta_previously/
@@ -26,15 +26,19 @@ type=LL(1)
 
 {% endhighlight %}
 
-From the wiki page we can see that we need parsers for three major elements, properties, sections and whitespace (including comments). Well tackle each one separately in the order which they are needed.
+From the wiki page and the example text we can see that we need parsers for three major elements, properties, sections and whitespace (including comments). Well tackle each one separately in the order which they are needed.
 
 ### Parsing properties
 
-Starting with properties we can see that we need to parse the property name followed by an equals sign followed by the value which reaches until the end of the line. In combine sequencing is most easily done using tuples so we can write the property parser like so.
+Starting with properties we can see that we need to parse the property name followed by an equals sign followed by the value which reaches until the end of the line. In combine the easiest way of running parsers in sequence is to use tuples which lets use write the property parser like so.
 
 {% highlight rust %}
 
-(many1(satisfy(|c| c != '=')), token('='), many1(satisfy(|c| c != '\n')))
+(
+    many1(satisfy(|c| c != '=' && c != '[' && c != ';')),
+    token('='),
+    many1(satisfy(|c| c != '\n' && c != ';'))
+)
     .map(|(key, _, value)| (key, value))
 
 {% endhighlight %}
@@ -45,12 +49,12 @@ There are four different predefined parsers doing work in this line.
 * `token` creates a parser which accepts the given token.
 * `map` transforms the result of a sucessful parse into a new result. We use it here to only return a tuple of the key and value, skipping the result of the `token('=')` parser.
 
-All put together we have constructed a property parser which we can pass around however we want, well almost. To create a parser with combine a the [Parser][Parser] trait is used, each parser is then its own type which implement the `Parser` trait. This is great for ensuring that the compiler never loses any information when it comes to optimizing the code at the cost of some rather large types.
+All put together we have constructed a property parser in just a few lines which we can pass around however we want, well almost. To create a parser with combine a the [Parser][Parser] trait is used and each of the parsers mentioned above is its own type which implement the `Parser` trait. This technique is great for ensuring that the compiler never loses any information when it comes to optimizing the code. This does howoever come at the cost of some rather large types.
 
     //Type of the property parser
     Map<(Many<_, Satisfy<_, [closure@examples\ini.rs:18:19: 18:31]>>, Token<_>, Many<_, Satisfy<_, [closure@examples\ini.rs:18:60: 18:73]>>), [closure@examples\ini.rs:19:14: 19:44]>
 
-Even if we could return closure types from functions that is still a long type we dont really want to type out. We could box the parser but that requires an allocation so we will instead do one better and wrap the parser inside a function which directly calls the parser.
+Even if we could return closure types from functions that is still a long type we dont really want to type out. We could box the parser but that requires an allocation each time we need the parser which we do not actually need. Instead we can do one better and wrap the parser inside a function which directly calls the parser.
 
 [Parser]:https://marwes.github.io/combine/combine/trait.Parser.html
 
@@ -67,7 +71,7 @@ where I: Stream<Item=char> + 'a {
         .map(|(key, _, value)| (key, value)))
 }
 
-///Wrapping the parser in a function we avoid allocating a box each time we need the parser
+///By hiding the parser inside a function we do not need to allocate a box each time we need the parser
 fn property<I>(input: State<I>) -> ParseResult<(String, String), I>
 where I: Stream<Item=char> {
     (
@@ -83,7 +87,7 @@ where I: Stream<Item=char> {
 
 ### Parsing whitespace and comments
 
-Parsing whitespace are done similiarily as the property parser. We do however need a few more parsers to write it. The `skip_many` works in the same way as the `many` parser only it ignores the result which makes it a more efficient parser when we do not care about the result. Next we use the `or` method to create a parser which parses either whitespace through the predefined `spaces` parser or comments.
+Parsing whitespace are done similiarily as the property parser. We do however need a few more parsers to write it. The `skip_many` parses in the same way as the `many` parser only it ignores the result. This makes it a slightly more efficient for cases like this when we do not care about the result. Next we use the `or` method to create a parser which parses either whitespace through the predefined `spaces` parser or comments.
 
 {% highlight rust %}
 
@@ -126,7 +130,7 @@ where I: Stream<Item=char>
 
 ### Putting it all together
 
-Finally we can put it all together into the complete ini parser. As each ini file can start with properties which do not belong to a named section we create a small struct which contains the global properties as well as the ones contained in a section. We then reuse the `properties` parser which we used above in the section parser to parse any properties which appear before any section. Lastly we skip any whitespace before the first property/section.
+Finally we can put it all together into the complete INI parser. As each INI file can start with properties which do not belong to a named section we create a small struct which contains the global properties as well as the ones contained in a section. We then reuse the `properties` parser which we used above in the section parser to parse any properties which appear before any section. Lastly we skip any whitespace before the first property/section.
 
 {% highlight rust %}
 pub struct Ini {
@@ -176,7 +180,7 @@ Its always a good idea to test error cases as well. This parser is quite liberal
     Unexpected 'end of input'
     Expected ']'
 
-Which is pretty good but if we wanted to be a bit clear that we expected a section at this point we can use the `expected` combinator to attach an error message when the parser fails.
+Which is pretty good but if we wanted to be a bit clearer we might want to say that we expected a section at this point. To do this we can use the `expected` combinator to attach an error message when the parser fails.
 
 {% highlight rust %}
 
@@ -202,7 +206,7 @@ Which gives us an error message which may be a bit easier to understand.
 
 ### The final parser
 
-Below is the parser in its entirety. It could use some improvements but as the ini format isn't exactly specified I prefer to keep it rather minimal. You can find the complete source with tests [here][ini source].
+Below is the parser in its entirety. It could use some improvements but as the INI format isn't exactly specified I prefer to keep it rather minimal which should let it be easy to extend to handle some more specific things. You can find the complete source with tests [here][ini source].
 
 [ini source]:https://github.com/Marwes/combine/blob/master/tests/ini.rs
 
@@ -263,15 +267,16 @@ where I: Stream<Item=char> {
 
 ## Whats next
 
-Hopefully this should give a good idea about to go about building parsers using combine. In this case we only parse a string but this parsers could equally well be used to parse any other input stream such as iterators. More examples can be found in the [benches][benches] and [tests][tests] directories of combine.
+Hopefully this should give a good idea about to go about building parsers using combine. Though we only parse a string but this parser could equally well be used to parse any other input stream such as iterators. If you want to see more examples of parsing using combine they can be found in the [benches][benches] and [tests][tests] directories of combine.
 
 Though combine has reached 1.0.0 that does not mean that it is done. I have already two more features lying in wait, [zero copy parsing][zero copy] and using [non-cloneable iterators][no clone iterator]. These should get merged in under an experimental feature pretty soon so that they can get some testing before stabilizing them.
 
-Thats all for now, depending on the interest I may write more on this blog about combine or the [compiler][compiler] I am writing in rust in which you can find a much more complicated example on how to use combine.
+Thats all for now, depending on the interest I may write more about combine or the [programming langauge][languager] I am writing (also in rust) in which you can find a much more [advanced example][embed_lang parser] on how to use combine.
 
 [benches]:https://github.com/Marwes/combine/blob/master/benches
 [tests]:https://github.com/Marwes/combine/blob/master/tests/
 
 [zero copy]:https://github.com/Marwes/combine/pull/42
 [no clone iterator]:https://github.com/Marwes/combine/pull/37
-[compiler]:https://github.com/Marwes/embed_lang
+[language]:https://github.com/Marwes/embed_lang
+[embed_lang parser]:https://github.com/Marwes/embed_lang/blob/master/parser/src/lib.rs
