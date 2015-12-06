@@ -62,9 +62,11 @@ Past the virtual machine I also want to expose the other parts of the compiler s
 
 ## you >>= read_post >>= (\feedback -> me.improve_posts feedback)
 
-So thats the short tour of embed_lang. I'd love to get some feedback on what you think may work, whats interesting and on what will simply crash and burn. I have a couple of ideas for other posts about the language as well as more Rust centric posts so if anything in particular in this poist seems interesting please let me know in the Reddit post or by email.
+So thats the short tour of embed_lang. I'd love to get some feedback on what you think may work, whats interesting and on what will simply crash and burn. I have a couple of ideas for other posts about the language as well as more Rust centric posts so if anything in particular in this poist seems interesting please let me know in the [Reddit post][] or by email.
 
 [Lua]: http://www.lua.org
 [Haskell]: http://www.haskell.org
 [OCaml]: http://www.ocaml.org
 [Rust]: http://www.rust-lang.org
+
+[Reddit post]:https://www.reddit.com/r/rust/comments/3vns8b/embed_lang_an_embeddable_language_written_in_rust/
