@@ -1,5 +1,5 @@
 # Site settings
-title: Blogging blog
+title: Collecting Rust
 email: marwes91@gmail.com
 baseurl: "" # the subpath of your site, e.g. /blog/
 url: "http://marwes.github.io" # the base hostname & protocol for your site
