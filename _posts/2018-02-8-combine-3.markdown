@@ -325,7 +325,7 @@ NOTE: These parsers all operate on full input.
 ```
 # Benchmarks are run with `RUSTFLAGS="-C lto=fat -C codegen-units=1" CARGO_INCREMENTAL=0`
 
-# Combine 3.0
+# Combine 3.0.0-beta.1
 running 3 tests
 test http_requests_large             ... bench:     389,923 ns/iter (+/- 173,676)
 test http_requests_large_cheap_error ... bench:     283,130 ns/iter (+/- 20,828)
@@ -354,6 +354,10 @@ test small_test  ... bench:      48,863 ns/iter (+/- 15,727)
 I hope that this post has sparked your interest in using Combine or at least provided an interesting overview of the additional challenges of asynchronous parsing.
 I am hopeful that the small performance gap between Combine 3.0 and 2.5 can be removed with some additional profiling and that the regression in rustc can be fixed.
 Even if that is not the case or it takes some time, Combine 3 still provides respectable performance using the same trait based approach to parser composition as before.
+
+Version 3.0.0-beta.1 was released a little less than a week ago with a plan to make very few breaking changes before a true 3.0 in a month or two.
+If any breaking changes happen between now and then they will either be trivial to fix or only break things if you dive deep into the internals of combine (working with Combine's internals is very rarely necessary).
+
 If you run into any trouble using the library feel free to [open an issue][] or shoot a comment on [Gitter][].
 
 Thanks to [@ordian](https://github.com/ordian), [@cramertj](https://github.com/cramertj) and [@dsprenkels](https://github.com/dsprenkels) for submitting fixes!
