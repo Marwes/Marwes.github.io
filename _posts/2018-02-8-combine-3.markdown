@@ -1,4 +1,7 @@
-# Combine v3
+---
+layout: post
+title:  "Combine 3 - Partial parsing in Rust"
+---
 
 > Combine is a parser combinator library for the Rust programming language
 
@@ -21,7 +24,7 @@ parser.easy_parse(&b"123.45"[..]);
 parser.easy_parse(&b"123"[..]);
 ```
 
-As you might have guessed those aren't all the changes coming in Combine 3.0. I have one additional big change that I put together over the last few weeks which should be especially useful as asynchronous programs becomes more common in Rust.
+As indicated by the title those aren't all the changes coming in Combine 3.0. I have one additional big change that I put together over the last few weeks which should be especially useful as asynchronous programs becomes more common in Rust.
 
 [gluon]:https://github.com/gluon-lang/gluon
 [combine 3.0.0-alpha.1]:https://www.reddit.com/r/rust/comments/6s792a/combine_250_and_300alpha1/
