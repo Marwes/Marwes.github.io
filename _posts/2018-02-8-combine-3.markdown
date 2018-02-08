@@ -360,6 +360,9 @@ If any breaking changes happen between now and then they will either be trivial 
 
 If you run into any trouble using the library feel free to [open an issue][] or shoot a comment on [Gitter][].
 
+
+**EDIT**: For more advanced usage of partial parsing I have made a [pair](https://github.com/mitsuhiko/redis-rs/pull/141) of [PRs](https://github.com/mitsuhiko/redis-rs/pull/143) for [redis-rs](https://github.com/mitsuhiko/redis-rs) which uses combine to parse asynchronous responses from redis. The first PR does a more straight translation of the original synchronous implementation and gets a slightly awkward API as a result of this whereas the second fully embraces tokio decoders to get a simpler API.
+
 Thanks to [@ordian](https://github.com/ordian), [@cramertj](https://github.com/cramertj) and [@dsprenkels](https://github.com/dsprenkels) for submitting fixes!
 
 Special thanks to [@Jim-Holmstroem](https://github.com/Jim-Holmstroem) for proofreading this post!
