@@ -53,7 +53,8 @@ If it succeeds, everything is fine and we remove the input we parsed from the bu
 If it fails because we happened to not have enough input then we simply ask the io device to fill the buffer with more input and then try again once it becomes available.
 Since we only failed to parse a small part of the full input we didn't lose much progress either.
 
-This pattern is called a [finite-state machine][] and as an example of one, here is a parser for the JSON-RPC messages used in the [language server protocol][] (only the messages, not the JSON parsing itself to keep things simple).
+To be a bit less abstract, here is a parser for the JSON-RPC messages used in the [language server protocol][] built as a state machine into a [`tokio_io::codec::Decoder`](https://docs.rs/tokio-io/0.1.5/tokio_io/codec/trait.Decoder.html).
+To keep things simple this parser decodes the messages but does not do any JSON parsing.
 
 [finite-state machine]:https://en.wikipedia.org/wiki/Finite-state_machine
 [language server protocol]:https://microsoft.github.io/language-server-protocol/
@@ -62,7 +63,7 @@ This pattern is called a [finite-state machine][] and as an example of one, here
 
 ```
 Content-Length: 18
-    
+
 { "some": "data" }
 ```
 
@@ -79,38 +80,42 @@ pub struct LanguageServerDecoder {
 }
 
 macro_rules! decode {
-    ($parser: expr, $src: expr) => {
-        {
-            let (output, removed_len) = {
-                let opt = combine_decode($parser, &$src[..])
-                    .map_err(|err| {
-                    // Since err contains references into `src` we must replace these before
-                    // we can return an error or call `split_to`
-                    err.map_range(|r| {
-                        str::from_utf8(r)
-                            .ok()
-                            .map_or_else(|| format!("{:?}", r), |s| s.to_string())
-                    }).map_position(|p| p.translate_position(&src[..]))
-                })?;
-                match opt {
-                    None => return Ok(None),
-                    Some(x) => x,
-                }
-            };
-            // Remove the input we just consumed
-            $src.split_to(removed_len);
-            output
-        }
-    };
+    ($parser: expr, $src: expr) => { {
+        let (output, removed_len) = {
+            let opt = combine_decode($parser, &$src[..])
+                .map_err(|err| {
+                // Since err contains references into `src` we must replace these
+                // before we can return an error or call `split_to`
+                err.map_range(|r| {
+                    str::from_utf8(r)
+                        .ok()
+                        .map_or_else(|| format!("{:?}", r), |s| s.to_string())
+                }).map_position(|p| p.translate_position(&src[..]))
+            })?;
+            match opt {
+                None => return Ok(None),
+                Some(x) => x,
+            }
+        };
+        // Remove the input we just consumed
+        $src.split_to(removed_len);
+        output
+    } };
 }
 
 impl Decoder for LanguageServerDecoder {
     type Item = String;
     type Error = Box<::std::error::Error + Send + Sync>;
 
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+    fn decode(
+        &mut self,
+        src: &mut BytesMut
+        ) -> Result<Option<Self::Item>, Self::Error>
+    {
         loop {
             match self.state {
+                // Nothing has been parsed so start looking for the
+                // `Content-Length` header
                 State::Nothing => {
                     let value = decode!(
                         (
@@ -121,21 +126,28 @@ impl Decoder for LanguageServerDecoder {
                             range(&b"\r\n\r\n"[..]),
                         ).map(|t| t.2)
                             .and_then(|digits: &[u8]|{
-                                str::from_utf8(digits).unwrap().parse::<usize>()
+                                str::from_utf8(digits)
+                                    .unwrap()
+                                    .parse::<usize>()
                             }),
                         src
                     );
 
-                    // We now know how long the message is and we can transition to the next state 
+                    // We now know how long the message is
+                    // and we can transition to the next state 
                     self.state = State::ContentLength(value);
                 }
+
+                // We know how long the message is so try to extract that much data
                 State::ContentLength(message_length) => {
                     let message = decode!(
                         take(message_length).map(|bytes: &[u8]| bytes.to_owned()),
                         src
                     );
                     
-                    // We parsed a message! Return to the starting state and look for the next `Content-Length` header
+                    // We parsed a message!
+                    // Return to the starting state and look for the next
+                    // `Content-Length` header
                     self.state = State::Nothing;
                     return Ok(Some(String::from_utf8(message)?));
                 }
@@ -153,7 +165,11 @@ impl Decoder for MyDecoder {
     type Item = ...;
     type Error = ...;
 
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+    fn decode(
+        &mut self,
+        src: &mut BytesMut
+        ) -> Result<Option<Self::Item>, Self::Error> 
+    {
         loop {
             match self.state {
                 State::State1(..) => {
@@ -175,7 +191,7 @@ impl Decoder for MyDecoder {
 
                 // ...
 
-                State::State10(..) => {
+                State::StateX(..) => {
                     // ...
                     self.state = State::State1(..);
                 }
@@ -210,6 +226,12 @@ pub struct LanguageServerDecoder {
 parser! {
     // To avoid writing out the state type we Box it using `AnyPartialState` and the `any_partial_state` parser combinator
     type PartialState = AnyPartialState;
+    // The syntax of the parser macro follows normal function declarations as closely
+    // as possible but requires brackets (`[]`) around the type parameters
+    // and around the where clause.
+    // It also requires extra bit of information between the arguments and the return type
+    // which marks what input the parser takes.
+    // In this case the input is `I: RangeStream`
     fn decode_parser['a, I]()(I) -> Vec<u8>
     where [ I: RangeStream<Item = u8, Range = &'a [u8]>, ]
     {
@@ -219,16 +241,21 @@ parser! {
                     recognize(skip_many1(digit()))
                         .and_then(|digits: &[u8]|
                             str::from_utf8(digits).unwrap().parse::<usize>()
-                                // Convert the error from `.parse` into an error combine understands
+                                // Convert the error from `.parse`
+                                // into an error combine understands
                                 .map_err(StreamErrorFor::<I>::other)
                         )
                 );
-        any_partial_state((
-            skip_many(range(&b"\r\n"[..])),
-            content_length,
-            range(&b"\r\n\r\n"[..]).map(|_| ()),
+        any_partial_state(
+            (
+                skip_many(range(&b"\r\n"[..])),
+                content_length,
+                range(&b"\r\n\r\n"[..]).map(|_| ()),
+            )
+            .then_partial(|&mut (_, message_length, _)| {
+                take(message_length).map(|bytes: &[u8]| bytes.to_owned())
+            })
         )
-            .then_partial(|&mut (_, message_length, _)| take(message_length).map(|bytes: &[u8]| bytes.to_owned())))
     }
 }
 
@@ -239,8 +266,10 @@ impl Decoder for LanguageServerDecoder {
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         let (opt, removed_len) = combine::stream::decode(
             message_parser(),
-            // easy::Stream gives us nice error messages (the same error messages that combine has had since its inception)
-            // PartialStream lets the parsers know that more input should be expected if end of input is unexpectedly reached
+            // easy::Stream gives us nice error messages
+            // (the same error messages that combine has had since its inception)
+            // PartialStream lets the parsers know that more input should be expected
+            // if end of input is unexpectedly reached
             easy::Stream(PartialStream(&src[..])),
             &mut self.state,
         ).map_err(|err| {
@@ -256,9 +285,11 @@ impl Decoder for LanguageServerDecoder {
         // Remove the input we just consumed
         src.split_to(removed_len);
         Ok(match opt {
-            // `None` means we did not have enough input and we require that the caller of `decode` supply more before calling us again
+            // `None` means we did not have enough input and we require that the
+            // caller of `decode` supply more before calling us again
             None => None,
-            // `Some` means that a message was successfully decoded (and that we are ready to start decoding the next message)
+            // `Some` means that a message was successfully decoded
+            // (and that we are ready to start decoding the next message)
             Some(output) => Some(String::from_utf8(output)?),
         })
     }
@@ -320,7 +351,10 @@ Thanks to [@ordian](https://github.com/ordian), [@cramertj](https://github.com/c
 Special thanks to [@Jim-Holmstroem](https://github.com/Jim-Holmstroem) for proof reading this post!
 
 [Documentation on docs.rs](https://docs.rs/combine)
+
 [Github](https://github.com/Marwes/combine)
+
+[crates.io](https://crates.io/crates/combine)
 
 [open an issue]:https://github.com/Marwes/combine/issues
 [Gitter]:https://gitter.im/Marwes/combine
