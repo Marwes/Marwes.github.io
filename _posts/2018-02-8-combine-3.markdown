@@ -9,7 +9,8 @@ It didn't help that I didn't have a killer feature for 3.0 either, user-defined 
 Most of the other changes were about cleanup, removing deprecated items and generalizing some types and functions. The [range::recognize][] parser deserves some special mention though. What it does is to take *any* Combine parser and makes it return a `Range` of the input, usually a slice (`&str` or `&[u8]`). This greatly increases the flexibility of range (zero-copy) parsers making it possible to write a simple float parser like this.
 
 ```rust
-// Since `recognize` ignores the output of the parser it wraps we use `skip_` parsers to avoid allocating any containers for the digits
+// Since `recognize` ignores the output of the parser it wraps we use `skip_`
+// parsers to avoid allocating any containers for the digits
 let mut parser = recognize((
     skip_many1(digit()),
     optional((token(b'.'), skip_many(digit()))),
@@ -138,7 +139,8 @@ impl Decoder for LanguageServerDecoder {
                     self.state = State::ContentLength(value);
                 }
 
-                // We know how long the message is so try to extract that much data
+                // We know how long the message is so try to extract that much
+                // data
                 State::ContentLength(message_length) => {
                     let message = decode!(
                         take(message_length).map(|bytes: &[u8]| bytes.to_owned()),
@@ -224,14 +226,16 @@ pub struct LanguageServerDecoder {
 }
 
 parser! {
-    // To avoid writing out the state type we Box it using `AnyPartialState` and the `any_partial_state` parser combinator
+    // To avoid writing out the state type we Box it using `AnyPartialState`
+    // and the `any_partial_state` parser combinator
     type PartialState = AnyPartialState;
-    // The syntax of the parser macro follows normal function declarations as closely
-    // as possible but requires brackets (`[]`) around the type parameters
-    // and around the where clause.
-    // It also requires extra bit of information between the arguments and the return type
-    // which marks what input the parser takes.
-    // In this case the input is `I: RangeStream`
+
+    // The syntax of the parser macro follows normal function declarations as
+    // closely as possible but requires brackets (`[]`) around the type
+    // parameters and around the where clause.
+    // It also requires extra bit of information between the arguments and
+    // the return type which marks what input the parser takes.
+    // In this case the input is `I: RangeStream`.
     fn decode_parser['a, I]()(I) -> Vec<u8>
     where [ I: RangeStream<Item = u8, Range = &'a [u8]>, ]
     {
@@ -268,13 +272,13 @@ impl Decoder for LanguageServerDecoder {
             message_parser(),
             // easy::Stream gives us nice error messages
             // (the same error messages that combine has had since its inception)
-            // PartialStream lets the parsers know that more input should be expected
-            // if end of input is unexpectedly reached
+            // PartialStream lets the parsers know that more input should be
+            // expected if end of input is unexpectedly reached
             easy::Stream(PartialStream(&src[..])),
             &mut self.state,
         ).map_err(|err| {
-            // Since err contains references into `src` we must replace these before
-            // we can return an error or call `split_to`
+            // Since err contains references into `src` we must replace
+            // these before we can return an error or call `split_to`
             err.map_range(|r| {
                 str::from_utf8(r)
                     .ok()
@@ -282,7 +286,10 @@ impl Decoder for LanguageServerDecoder {
             }).map_position(|p| p.translate_position(&src[..]))
         })?;
 
-        // Remove the input we just consumed
+        // Remove the input we just consumed.
+        // Ideally this would be done automatically by the call to
+        // `stream::decode` but it does unfortunately not work due
+        // to lifetime issues (Non lexical lifetimes might fix it!)
         src.split_to(removed_len);
         Ok(match opt {
             // `None` means we did not have enough input and we require that the
@@ -348,7 +355,7 @@ If you run into any trouble using the library feel free to [open an issue][] or 
 
 Thanks to [@ordian](https://github.com/ordian), [@cramertj](https://github.com/cramertj) and [@dsprenkels](https://github.com/dsprenkels) for submitting fixes!
 
-Special thanks to [@Jim-Holmstroem](https://github.com/Jim-Holmstroem) for proof reading this post!
+Special thanks to [@Jim-Holmstroem](https://github.com/Jim-Holmstroem) for proofreading this post!
 
 [Documentation on docs.rs](https://docs.rs/combine)
 
