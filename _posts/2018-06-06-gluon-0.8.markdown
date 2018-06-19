@@ -74,9 +74,9 @@ let f e : Either Int a -> Int =
 
 More documentation on this can be found in the [marshalling chapter][] of the gluon book.
 
-[@Laegluin](https://github.com/Laegluin)
-[#541](https://github.com/gluon-lang/gluon/pull/541)
-[#546](https://github.com/gluon-lang/gluon/pull/546)
+[@Laegluin]:https://github.com/Laegluin
+[#541]:https://github.com/gluon-lang/gluon/pull/541
+[#546]:https://github.com/gluon-lang/gluon/pull/546
 [marshalling chapter]:http://gluon-lang.org/book/marshalling-types.html
 
 
