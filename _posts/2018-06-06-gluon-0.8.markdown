@@ -6,7 +6,7 @@ date:   2018-06-19 09:00:00
 
 > Gluon is a statically typed, functional programming language designed for application embedding.
 
-After a bit of a longer time at *next version soon* stage, [Gluon](https://github.com/gluon-lang/gluon) 0.8 is now released! This version contains numerous new features and bug fixes, bringing gluon ever closer to being broadly usable!
+After a bit of a longer time at *next version soon* stage, [Gluon](https://github.com/gluon-lang/gluon) 0.8 is now released! This version contains numerous new features and bug fixes, bringing gluon ever so slightly closer to being usable!
 
 As always, the full changelog for 0.8 (and all previous versions) can be found [in the github repo](https://github.com/gluon-lang/gluon/blob/master/CHANGELOG.md).
 
@@ -22,9 +22,11 @@ min 1 2 // 1
 min (Cons "abc" Nil) None // None
 ```
 
-Implicit arguments finally makes ad-hoc polymorphism possible, completely replacing the limited (and rather hacky) implementation of overloading that existed before. If you haven't heard of implicits before then it can be good idea to think of it in terms of traits in Rust of type classes in Haskell as that is the most common use of implicit arguments. Where it differs is that conflicting "instances" are only an issue at a local level (as opposed to a program global level) which makes it possible to define, say `Show Float` in multiple ways and they will only conflict if they actually cause an ambiguity.
+Implicit arguments finally makes ad-hoc polymorphism possible. It completely replaces the limited (and rather hacky) implementation of overloading that were used before.
 
-It's not without its drawbacks though as this same flexibility also makes it more difficult to reason about what instance is actually used for a given implicit argument. For gluon, this drawback is arguably a necessary evil as the ad-hoc module system already lends itself poorly to supporting a more rigid trait/class system so we might as well reap the benefits of implicits instead.
+If you haven't heard of implicits before then it can be good idea to think of it in terms of traits in Rust of type classes in Haskell as that is the most common use of implicit arguments. Where it differs is that conflicting "instances" are only an issue at a local level (as opposed to a program global level) which makes it possible to define, say `Show Float` in multiple ways and they will only conflict if and when they actually cause an ambiguity.
+
+It's not without its drawbacks though as this same flexibility also makes it more difficult to reason about what instance is actually used for a given implicit argument. For gluon, this drawback is a necessary evil however, as the ad-hoc module system already lends itself poorly to supporting a more rigid trait/class system so we might as well reap the benefits of implicits instead.
 
 More documentation can be found in the [Implicit arguments](http://gluon-lang.org/book/syntax-and-semantics.html#implicit-arguments) section of the book.
 
@@ -40,13 +42,11 @@ More documentation can be found in the [Implicit arguments](http://gluon-lang.or
 /// assert (take 0 (repeat "abc") == empty)
 /// assert (take 3 (repeat 1) == stream.of [1, 1, 1])
 /// ```
-let take n xs : Int -> Stream a -> Stream a =
+let take n xs : Int -> Stream a -> Stream a = // ...
 ```
+> The example is lifted directly from the standard library and is tested automatically.
 
-Gluon now supports documentation generation and publishes this to http://gluon-lang.org/doc/nightly/index.html . While there is plenty of room for improvement in both the formatting and the documentation itself this should be a nice improvement in discoverability for the standard library. Of course, this documentation is not limited to the standard library so if you want to generate documentation for your own code that can be done by running `gluon doc <SOURCE> <TARGET>` or by importing and using the `gluon_doc` crate directly from Rust.
-
-Oh, and all the example code in any standard library also gets tested automatically (but that is yet to be exposed externally).
-
+Gluon now supports documentation generation and publishes this to http://gluon-lang.org/doc/nightly/index.html . While there is plenty of room for improvement in both the formatting and the documentation itself this should still be a helpful improvement for discoverability. Of course, this documentation is not limited to the standard library so if you want to generate documentation for your own code that can be done by running `gluon doc <SOURCE> <TARGET>` or by importing and using the `gluon_doc` crate directly from Rust.
 
 ## Marshalling derive 
 
@@ -104,7 +104,7 @@ The [signature help][] request of the [Language Server Protocol][] were also imp
 
 ## Refactored the standard library
 
-The prelude is no longer the mishmash it previously was as all its functionality has been moved out into dedicated modules. Further refactoring of the standard library is still likely though most modules should now be focused enough that the functionality they contain are in the right module, it is just the module itself that may need to be moved or renamed.
+The `std.prelude` module is no longer the mishmash it previously was as all its functionality has been moved out into dedicated modules, letting the `prelude` only focus on documenting what all gluon code gets implicitly imported. Further refactoring of the standard library is still likely but most modules should now be focused enough that the functionality they contain are in the right module, it is just the module itself that may need to be moved or renamed.
 
 ## What's next?
 
