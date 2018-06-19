@@ -1,7 +1,7 @@
---
+---
 layout: post
 title:  "Gluon 0.8: Implicit arguments, more docs and simpler marshalling"
-date:   2018-06-11 21:00:00
+date:   2018-06-19 09:00:00
 ---
 
 > Gluon is a statically typed, functional programming language designed for application embedding.
@@ -82,7 +82,7 @@ More documentation on this can be found in the [marshalling chapter][] of the gl
 
 ## Language server improvements
 
-<iframe src='https://gfycat.com/ifr/PalatableShowyEasteuropeanshepherd' frameborder='0' scrolling='no' width='1920' height='1080' allowfullscreen></iframe>
+<div style='position:relative;padding-bottom:54%'><iframe src='https://gfycat.com/ifr/PalatableShowyEasteuropeanshepherd' frameborder='0' scrolling='no' width='100%' height='100%' style='position:absolute;top:0;left:0' allowfullscreen></iframe></div>
 
 The language server has seen several improvements, [signature help][] which makes it easier to visualize which type the argument under the cursor has.
 
