@@ -59,7 +59,7 @@ enum Either<L, R> {
 }
 ```
 
-Thanks to [@Laegluin][] awesome work in [#541][] and [#546][] gluon there is now a `gluon_codegen` crate which makes it possible to automatically derive the traits used to marshal data to and from gluon! As an example, the above derive on `Either` will generate the code necessary to let `Either::Left(3)` on the Rust side, be passed to a gluon function which expects `Either Int a`.
+Thanks to [@Laegluin][]'s awesome work in [#541][] and [#546][] gluon there is now a `gluon_codegen` crate which makes it possible to automatically derive the traits used to marshal data to and from gluon! As an example, the above derive on `Either` will generate the code necessary to let `Either::Left(3)` on the Rust side, be passed to a gluon function which expects `Either Int a`.
 
 ```f#
 type Either l r = | Left l | Right r
