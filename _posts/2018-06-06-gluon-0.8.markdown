@@ -84,9 +84,7 @@ More documentation on this can be found in the [marshalling chapter][] of the gl
 
 <iframe width="560" height="315" src="https://www.youtube-nocookie.com/embed/59igc9juLSE?rel=0" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
 
-The language server has seen several improvements, [signature help][] which makes it easier to visualize which type the argument under the cursor has.
-
-Record expressions now gets suggestions for the local bindings which can be used as fields (taking into account the fields that have already been written).
+The language server has seen several improvements as well to improve its stability and let it return completion in more places. For instance, record expressions now gets suggestions for the local bindings which can be used as fields (taking into account the fields that have already been written).
 
 ```f#
 let abc = 123
@@ -99,6 +97,9 @@ let c = False
 }
 ```
 
+The [signature help][] request of the [Language Server Protocol][] were also implemented which makes it easier to visualize which type the argument under the cursor has.
+
+[Language Server Protocol]:https://microsoft.github.io/language-server-protocol
 [signature help]:https://microsoft.github.io/language-server-protocol/specification#textDocument_signatureHelp)
 
 ## Refactored the standard library
