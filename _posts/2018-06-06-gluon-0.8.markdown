@@ -116,4 +116,4 @@ I will at least start on an effect system, primarily to replace the current `IO`
 And that's all I have planned, any other changes will come as they are needed! Ideas, suggestions or bugs are very appreciated and can be reported on [the issue tracker][] or at [gitter][].
 
 [gitter]:https://gitter.im/gluon-lang/gluon
-[issue tracker]:https://github.com/gluon-lang/gluon/issues
+[the issue tracker]:https://github.com/gluon-lang/gluon/issues
