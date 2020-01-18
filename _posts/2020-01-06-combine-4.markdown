@@ -1,0 +1,156 @@
+---
+layout: post
+title:  "Combine 4 - Parser combinators"
+---
+
+> Combine is a parser combinator library for the Rust programming language
+
+## Refactoring the internals (a bit)
+
+Some of the internal structures and concepts have been simplified such that `combine` always talks about `Token/token` instead of `Item/item`. This does cause some fallout when upgrading type bounds (`Stream<Item = char>`) is directly affected but consistency was deemed more important here and using `Token` differentiates `Stream` from `Iterator`.
+
+Combine's concept of consumed/empty has been renamed to commit/peek to be more self explanatory. A parser that returns `Commit` has committed to this parse meaning parsing can't continue after failure (unless overridden with [`attempt`][]). If parser only returns `Peek` on the other hand then parsers like [`choice`][] can continue to try other parsers. (By default the behaviour is that it *commits* to a parse if it successfully *consumes* one token, hence the previous naming).
+
+[`attempt`]:https://docs.rs/combine/*/combine/fn.attempt.html
+[`choice`]:https://docs.rs/combine/*/combine/fn.choice.html
+
+`FullRangeStream` has been absorbed into `RangeStream` as any `RangeStream` could trivially also implement `FullRangeStream`.
+
+The `Parser` trait now takes `Input` as a type parameter instead of an associated type. This will in theory make `Parser`s more general in what they can accept but in practice I have yet to see an example of this. This issue is partly because extensions methods on traits ([`and`][], [`and_then`][], [`message`][] etc) with type parameters can cause type inference issues if the type parameter type of `self` can't be figured out, forcing all parsers to still specify a phantom input type instead of leaving it to be inferred.
+
+[`and`]:https://docs.rs/combine/*/combine/trait.Parser.html#method.and
+[`and_then`]:https://docs.rs/combine/*/combine/trait.Parser.html#method.and_then
+[`message`]:https://docs.rs/combine/*/combine/trait.Parser.html#method.message
+
+```rust
+// Would like to writer parsers like
+struct Token<T> { token: T }
+impl<I> Parser<I> for Token<I::Token> {
+}
+
+// Instead of
+struct Token<T, I> { token: T, _marker: PhantomData<fn (I)> }
+impl<I> Parser<I> for Token<I::Token, I> {
+}
+```
+
+Another part of it is that higher ranked types do not exist, in Rust preventing useful wrappers like the following to be written (which would not work if associated types were used).
+
+
+```rust
+// This is really simplistic, but the same idea can be applied to decode `std::io::Read`, `tokio::io::AsyncRead`
+// and implementing `tokio_util::codec::Decoder`
+fn parse_file<P>(file: &Path, p: P) -> Result<P::Output>
+where
+    P: for<I> Parser<I>
+        where I: From<&'a [u8]>,
+{
+    let buf = std::fs::read(file)?;
+    Ok(p.parse(I::from(&buf[..]))?)
+}
+```
+
+## Faking higher ranked types (but not really)
+
+While it is impossible to define helper functions to parse `Read`, it is actually possible to define macros that, with some limitations, allows for simple parsing from io sources without reading the entire thing into memory, without re-parsing parts of the input after more data was found to be needed, while still efficiently parsing plain `&[u8]` slices(*).
+
+[`decode!`][], [`decode_futures_03!`][] and [`decode_tokio_02!`][] each implements this decoding scheme on `std::io::Read`, `futures::io::AsyncRead` and `tokio::io::AsyncRead`. The macro and associated `Decoder` struct handles reading and buffering the data that the parser requires so that the parser itself only needs to worry about how much data it needs at most to complete a parse, but not how to efficiently and correctly buffer it.
+
+
+```rust
+use futures::pin_mut;
+use tokio::{
+    fs::File,
+};
+
+use combine::{decode_tokio_02, satisfy, skip_many1, many1, sep_end_by, Parser, stream::Decoder};
+
+#[tokio::main]
+async fn main() {
+    let decoder = Decoder::<_, _>::new(File::open("README.md").await.unwrap());
+    pin_mut!(decoder);
+    let is_whitespace = |b: u8| b == b' ' || b == b'\r' || b == b'\n';
+    assert_eq!(
+        decode_tokio_02!(
+            decoder,
+            {
+                let word = many1(satisfy(|b| !is_whitespace(b)));
+                sep_end_by(word, skip_many1(satisfy(is_whitespace))).map(|words: Vec<Vec<u8>>| words.len())
+            },
+            combine::easy::Stream::from
+        ).map_err(|err: combine::easy::Errors<u8, &[u8], usize>| err),
+        Ok(819),
+    );
+}
+```
+
+[`decode!`]:https://docs.rs/combine/*/combine/macro.decode.html
+[`decode_futures_03!`]:https://docs.rs/combine/*/combine/macro.decode_futures_03.html
+[`decode_tokio_02!`]:https://docs.rs/combine/*/combine/macro.decode_tokio_02.html
+
+
+(*) `combine::stream::read::Stream` could and can still be used to parse directly from a `std::io::Read`, but it comes with a bit more overhead to to the extra complexity when fetching the next byte and it can't use combine's [`range`][] parsers which require slices to work.
+
+[`range`]:https://docs.rs/combine/*/combine/parser/range/index.html
+
+
+## More fixes
+
+`PartialEq` is no longer required on `Token` (`Item`) and `Range`. These bounds shouldn't have been needed after 3.0 revamped the error implementation but since they were forgotten I had to wait until a breaking release to remove them.
+
+[`reset`][] can now return an error, allowing `BufferedStream` to correctly error in more cases where it's buffer is exceeded.
+
+[`reset`]:https://docs.rs/combine/*/combine/stream/trait.ResetStream.html#tymethod.reset
+
+## Added parsers
+
+A few more parsers have been added, the most generally useful probably being [`dispatch!`][] which more or less is a `match` expression which works with `parsers`.
+
+```rust
+use combine::{dispatch, any, token, satisfy, EasyParser, Parser};
+
+let mut parser = any().then(|e| {
+    dispatch!(e;
+        'a' => token('a'),
+        'b' => satisfy(|b| b == 'b'),
+        t if t == 'c' => any(),
+        _ => token('d')
+    )
+});
+assert_eq!(parser.easy_parse("aa"), Ok(('a', "")));
+assert_eq!(parser.easy_parse("cc"), Ok(('c', "")));
+assert_eq!(parser.easy_parse("cd"), Ok(('d', "")));
+assert!(parser.easy_parse("ab").is_err());
+```
+
+Other added parsers are [`repeat_until`][], [`iterate`][], [`produce`][] and [`factory`][]
+
+[`dispatch!`]:https://docs.rs/combine/*/combine/macro.dispatch.html
+[`repeat_until`]:https://docs.rs/combine/*/combine/parser/repeat/fn.repeat_until.html
+[`iterate`]:https://docs.rs/combine/*/combine/parser/repeat/fn.iterate.html
+[`produce`]:https://docs.rs/combine/*/combine/fn.produce.html
+[`factory`]:https://docs.rs/combine/*/combine/parser/combinator/fn.factory.html
+
+
+## More examples
+
+`combine` is usually a crate I leave alone until I have some ideas for using it or there is an issue reported on it. This release and the additions in it is no different and I managed to work on two small projects which were in need for parsing while making the changes for 4.0.
+
+### combine_jpeg
+
+[combine_jpeg][] is a basic jpeg decoder which really tests the limits of combine's partial parsing. Instead of the complicated state storing and loading of https://github.com/mozilla/mozjpeg or being tied to synchronous file reading like in https://github.com/kaksmet/jpeg-decoder I wanted to try for the speed of mozjpeg without the complexity (or at least while hiding the complexity in combine).
+
+The current implementation falls short of that ambition however, it is still quite complex as some trickery is needed to translate between the byte and bit based streams used in the jpeg format and I haven't been able to reach the performance of mozjpeg. The performance is still better than (single threaded) https://github.com/kaksmet/jpeg-decoder on the images that combine_jpeg can decode but without figuring out where the remaining gap comes from I don't feel motivated to extend the project further.
+
+[combine_jpeg]:https://github.com/Marwes/combine-jpeg
+
+### kafka_protocol
+
+[kafka_protocol][] implements encoding and decoding of [Kafka][] reuqests and responses where combine handles the decoding part. Since all kafka messages are length prefixed there isn't really a pressing need for combine so far as it is always known how much need to be read into memory before processing a request/response. For large fetch/produce calls it might be useful to incrementally decode messages to reduce memory at some later point however so it might come in play there.
+
+In any case it serves as a good display for how binary formats can be handled with combine. All protocol types are actually generated from the protocol specification (which again, is parsed with combine) letting new versions the protocol be created easily.
+
+While sending and receiving requests works well in my testing, there is a lot more to a kafka client so think of this more as a building block to an eventual kafka client.
+
+[kafka_protocol]:https://github.com/Marwes/combine-jpeg
+[Kafka]:https://kafka.apache.org/
