@@ -1,56 +1,53 @@
 ---
 layout: post
-title:  "Combine 4 - Parser combinators"
+title:  "Combine 4 - A long overdue update"
 ---
 
 > Combine is a parser combinator library for the Rust programming language
 
-## Refactoring the internals (a bit)
+So [combine][] 4 was actually released all the way back in January and I wrote most of this post back then as well, only to lose motivation due to lack of time and a general unhappiness with the flow of this post. I finally picked this up again, rewrote the worst parts into what I hope should inspire you to give combine 4 a try!
 
-Some of the internal structures and concepts have been simplified such that `combine` always talks about `Token/token` instead of `Item/item`. This does cause some fallout when upgrading type bounds (`Stream<Item = char>`) is directly affected but consistency was deemed more important here and using `Token` differentiates `Stream` from `Iterator`.
+[combine]:https://github.com/Marwes/combine
 
-Combine's concept of consumed/empty has been renamed to commit/peek to be more self explanatory. A parser that returns `Commit` has committed to this parse meaning parsing can't continue after failure (unless overridden with [`attempt`][]). If parser only returns `Peek` on the other hand then parsers like [`choice`][] can continue to try other parsers. (By default the behaviour is that it *commits* to a parse if it successfully *consumes* one token, hence the previous naming).
+## Simplifying the internals
+
+Compared to other parser combinator libraries, combine's internals can definitely seem intimidating. There are both more traits at play and they are also more complex. While there are good reasons for this, some improvements could still be made through some breaking changes.
+
+Some of the internal structures and concepts have been simplified such that `combine` always talks about `Token/token` instead of `Item/item`. This does cause some fallout when upgrading as type bounds (`Stream<Item = char>`) are directly affected but consistency was deemed more important here and using `Token` differentiates `Stream` from `Iterator`.
+
+Combine's concept of consumed/empty has been renamed to commit/peek to be more self explanatory. A parser that returns `Commit` has committed to this parse meaning parsing can't continue after failure (unless overridden with [`attempt`][]). If parser only returns `Peek` on the other hand then parsers like [`choice`][] will continue to try other parsers. (By default the behaviour is that it *commits* to a parse if it successfully *consumes* one token, hence the previous naming).
 
 [`attempt`]:https://docs.rs/combine/*/combine/fn.attempt.html
 [`choice`]:https://docs.rs/combine/*/combine/fn.choice.html
 
-`FullRangeStream` has been absorbed into `RangeStream` as any `RangeStream` could trivially also implement `FullRangeStream`.
+`FullRangeStream` has been absorbed into `RangeStream` as any `RangeStream` could trivially implement `FullRangeStream`.
 
-The `Parser` trait now takes `Input` as a type parameter instead of an associated type. This will in theory make `Parser`s more general in what they can accept but in practice I have yet to see an example of this. This issue is partly because extensions methods on traits ([`and`][], [`and_then`][], [`message`][] etc) with type parameters can cause type inference issues if the type parameter type of `self` can't be figured out, forcing all parsers to still specify a phantom input type instead of leaving it to be inferred.
+The `Parser` trait now takes `Input` as a type parameter instead of an associated type. In theory this makes `Parser` more general as they can accept `Input` types which refer to type parameters or lifetimes which do not appear in the concrete type.
+
+```rust
+// Could write writer parsers that do not need to refer to `I` in the concrete type like this
+struct Token<T> { token: T }
+impl<I> Parser<I> for Token<I::Token> {
+}
+
+// Instead of this
+struct Token<T, I> { token: T, _marker: PhantomData<fn (I)> }
+impl<I> Parser for Token<I::Token, I> {
+    type Input = I;
+}
+```
+
+However in practice it turns out not to work out as well as I hoped. This is because because extensions methods on traits like [`and`][], [`and_then`][], [`message`][] etc, cause type inference issues as to the `Input` type parameter can't be inferred. Thus all parsers must still specify a phantom input type instead of leaving it to be inferred.
 
 [`and`]:https://docs.rs/combine/*/combine/trait.Parser.html#method.and
 [`and_then`]:https://docs.rs/combine/*/combine/trait.Parser.html#method.and_then
 [`message`]:https://docs.rs/combine/*/combine/trait.Parser.html#method.message
 
-```rust
-// Would like to writer parsers like
-struct Token<T> { token: T }
-impl<I> Parser<I> for Token<I::Token> {
-}
+Taking a type parameter still seems worthwhile though as it is more correct in the sense that type parameters are input types, and it could still open up for parsers being more generic in the future so better to do the breaking change now than later.
 
-// Instead of
-struct Token<T, I> { token: T, _marker: PhantomData<fn (I)> }
-impl<I> Parser<I> for Token<I::Token, I> {
-}
-```
-
-Another part of it is that higher ranked types do not exist, in Rust preventing useful wrappers like the following to be written (which would not work if associated types were used).
+## Higher ranked parser types (but not really)
 
 
-```rust
-// This is really simplistic, but the same idea can be applied to decode `std::io::Read`, `tokio::io::AsyncRead`
-// and implementing `tokio_util::codec::Decoder`
-fn parse_file<P>(file: &Path, p: P) -> Result<P::Output>
-where
-    P: for<I> Parser<I>
-        where I: From<&'a [u8]>,
-{
-    let buf = std::fs::read(file)?;
-    Ok(p.parse(I::from(&buf[..]))?)
-}
-```
-
-## Faking higher ranked types (but not really)
 
 While it is impossible to define helper functions to parse `Read`, it is actually possible to define macros that, with some limitations, allows for simple parsing from io sources without reading the entire thing into memory, without re-parsing parts of the input after more data was found to be needed, while still efficiently parsing plain `&[u8]` slices(*).
 
@@ -67,18 +64,19 @@ use combine::{decode_tokio_02, satisfy, skip_many1, many1, sep_end_by, Parser, s
 
 #[tokio::main]
 async fn main() {
-    let decoder = Decoder::<_, _>::new(File::open("README.md").await.unwrap());
-    pin_mut!(decoder);
+    let mut read = File::open("README.md").await.unwrap();
+    let mut decoder = Decoder::new();
     let is_whitespace = |b: u8| b == b' ' || b == b'\r' || b == b'\n';
     assert_eq!(
         decode_tokio_02!(
             decoder,
+            &mut read,
             {
                 let word = many1(satisfy(|b| !is_whitespace(b)));
                 sep_end_by(word, skip_many1(satisfy(is_whitespace))).map(|words: Vec<Vec<u8>>| words.len())
             },
-            combine::easy::Stream::from
-        ).map_err(|err: combine::easy::Errors<u8, &[u8], usize>| err),
+            |input, _position| combine::easy::Stream::from(input),
+        ).map_err(combine::easy::Errors::<u8, &[u8], _>::from),
         Ok(819),
     );
 }
